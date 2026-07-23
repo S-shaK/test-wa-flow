@@ -1,0 +1,14 @@
+{
+  "name": "test-wa-flow",
+  "version": "1.0.0",
+  "description": "WhatsApp Flows Endpoint",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "body-parser": "^1.20.3",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}
