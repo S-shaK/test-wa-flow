@@ -1,112 +1,130 @@
-/**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
-
 import express from "express";
-import { decryptRequest, encryptResponse, FlowEndpointException } from "./encryption.js";
-import { getNextScreen } from "./flow.js";
 import crypto from "crypto";
+import {
+  decryptRequest,
+  encryptResponse,
+  FlowEndpointException,
+} from "./encryption.js";
+import { getNextScreen } from "./flow.js";
 
 const app = express();
 
 app.use(
   express.json({
-    // store the raw request body to use it for signature verification
     verify: (req, res, buf, encoding) => {
       req.rawBody = buf?.toString(encoding || "utf8");
     },
-  }),
+  })
 );
 
-const { APP_SECRET, PRIVATE_KEY, PASSPHRASE = "", PORT = "3000" } = process.env;
+const {
+  PORT = 3000,
+  VERIFY_TOKEN,
+  APP_SECRET,
+  PRIVATE_KEY,
+  PASSPHRASE = "",
+} = process.env;
 
-/*
-Example:
-```-----[REPLACE THIS] BEGIN RSA PRIVATE KEY-----
-MIIE...
-...
-...AQAB
------[REPLACE THIS] END RSA PRIVATE KEY-----```
-*/
+//
+// WEBHOOK VERIFICATION
+//
+app.get("/", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
 
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    console.log("✅ Webhook verified");
+    return res.status(200).send(challenge);
+  }
+
+  res.send("WhatsApp Flow Endpoint Running");
+});
+
+//
+// NORMAL WHATSAPP WEBHOOKS
+//
+app.post("/webhook", (req, res) => {
+  console.log("📩 WhatsApp Webhook");
+  console.log(JSON.stringify(req.body, null, 2));
+
+  res.sendStatus(200);
+});
+
+//
+// WHATSAPP FLOWS ENDPOINT
+//
 app.post("/", async (req, res) => {
-  if (!PRIVATE_KEY) {
-    throw new Error(
-      'Private key is empty. Please check your env variable "PRIVATE_KEY".'
-    );
-  }
-
-  if(!isRequestSignatureValid(req)) {
-    // Return status code 432 if request signature does not match.
-    // To learn more about return error codes visit: https://developers.facebook.com/docs/whatsapp/flows/reference/error-codes#endpoint_error_codes
-    return res.status(432).send();
-  }
-
-  let decryptedRequest = null;
   try {
-    decryptedRequest = decryptRequest(req.body, PRIVATE_KEY, PASSPHRASE);
+    if (!PRIVATE_KEY) {
+      throw new Error("PRIVATE_KEY environment variable missing.");
+    }
+
+    if (!isRequestSignatureValid(req)) {
+      return res.sendStatus(432);
+    }
+
+    const decryptedRequest = decryptRequest(
+      req.body,
+      PRIVATE_KEY,
+      PASSPHRASE
+    );
+
+    const {
+      aesKeyBuffer,
+      initialVectorBuffer,
+      decryptedBody,
+    } = decryptedRequest;
+
+    console.log("💬 Flow Request");
+    console.log(decryptedBody);
+
+    const response = await getNextScreen(decryptedBody);
+
+    console.log("➡️ Flow Response");
+    console.log(response);
+
+    return res.send(
+      encryptResponse(
+        response,
+        aesKeyBuffer,
+        initialVectorBuffer
+      )
+    );
   } catch (err) {
     console.error(err);
+
     if (err instanceof FlowEndpointException) {
-      return res.status(err.statusCode).send();
+      return res.sendStatus(err.statusCode);
     }
-    return res.status(500).send();
+
+    return res.sendStatus(500);
   }
-
-  const { aesKeyBuffer, initialVectorBuffer, decryptedBody } = decryptedRequest;
-  console.log("💬 Decrypted Request:", decryptedBody);
-
-  // TODO: Uncomment this block and add your flow token validation logic.
-  // If the flow token becomes invalid, return HTTP code 427 to disable the flow and show the message in `error_msg` to the user
-  // Refer to the docs for details https://developers.facebook.com/docs/whatsapp/flows/reference/error-codes#endpoint_error_codes
-
-  /*
-  if (!isValidFlowToken(decryptedBody.flow_token)) {
-    const error_response = {
-      error_msg: `The message is no longer available`,
-    };
-    return res
-      .status(427)
-      .send(
-        encryptResponse(error_response, aesKeyBuffer, initialVectorBuffer)
-      );
-  }
-  */
-
-  const screenResponse = await getNextScreen(decryptedBody);
-  console.log("👉 Response to Encrypt:", screenResponse);
-
-  res.send(encryptResponse(screenResponse, aesKeyBuffer, initialVectorBuffer));
-});
-
-app.get("/", (req, res) => {
-  res.send(`<pre>Nothing to see here.
-Checkout README.md to start.</pre>`);
-});
-
-app.listen(PORT, () => {
-  console.log(`Server is listening on port: ${PORT}`);
 });
 
 function isRequestSignatureValid(req) {
-  if(!APP_SECRET) {
-    console.warn("App Secret is not set up. Please Add your app secret in /.env file to check for request validation");
+  if (!APP_SECRET) {
+    console.warn("APP_SECRET not configured.");
     return true;
   }
 
-  const signatureHeader = req.get("x-hub-signature-256");
-  const signatureBuffer = Buffer.from(signatureHeader.replace("sha256=", ""), "utf-8");
+  const signature = req.get("x-hub-signature-256");
 
-  const hmac = crypto.createHmac("sha256", APP_SECRET);
-  const digestString = hmac.update(req.rawBody).digest('hex');
-  const digestBuffer = Buffer.from(digestString, "utf-8");
-
-  if ( !crypto.timingSafeEqual(digestBuffer, signatureBuffer)) {
-    console.error("Error: Request Signature did not match");
+  if (!signature) {
     return false;
   }
-  return true;
+
+  const expected = crypto
+    .createHmac("sha256", APP_SECRET)
+    .update(req.rawBody)
+    .digest("hex");
+
+  return crypto.timingSafeEqual(
+    Buffer.from(expected),
+    Buffer.from(signature.replace("sha256=", ""))
+  );
 }
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
