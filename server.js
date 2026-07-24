@@ -25,9 +25,42 @@ const {
   PASSPHRASE = "",
 } = process.env;
 
-//
-// WEBHOOK VERIFICATION
-//
+// ===== STARTUP DIAGNOSTICS =====
+
+console.log("======================================");
+console.log("Server starting...");
+
+console.log("PRIVATE_KEY loaded:", !!PRIVATE_KEY);
+
+if (PRIVATE_KEY) {
+  console.log("Key length:", PRIVATE_KEY.length);
+  console.log("First line:", PRIVATE_KEY.split("\n")[0]);
+  console.log(
+    "Last line:",
+    PRIVATE_KEY.split("\n")[PRIVATE_KEY.split("\n").length - 1]
+  );
+
+  try {
+    const derivedPublicKey = crypto
+      .createPublicKey(PRIVATE_KEY)
+      .export({
+        type: "spki",
+        format: "pem",
+      });
+
+    console.log("===== PUBLIC KEY DERIVED FROM RENDER PRIVATE KEY =====");
+    console.log(derivedPublicKey);
+    console.log("======================================================");
+  } catch (err) {
+    console.error("FAILED TO PARSE PRIVATE KEY");
+    console.error(err);
+  }
+}
+
+console.log("======================================");
+
+// ===== WEBHOOK VERIFICATION =====
+
 app.get("/", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -41,28 +74,30 @@ app.get("/", (req, res) => {
   res.send("WhatsApp Flow Endpoint Running");
 });
 
-//
-// NORMAL WHATSAPP WEBHOOKS
-//
+// ===== NORMAL WEBHOOK =====
+
 app.post("/webhook", (req, res) => {
   console.log("📩 WhatsApp Webhook");
   console.log(JSON.stringify(req.body, null, 2));
-
   res.sendStatus(200);
 });
 
-//
-// WHATSAPP FLOWS ENDPOINT
-//
+// ===== FLOW ENDPOINT =====
+
 app.post("/", async (req, res) => {
+  console.log("🔥 POST / received");
+
   try {
     if (!PRIVATE_KEY) {
-      throw new Error("PRIVATE_KEY environment variable missing.");
+      throw new Error("PRIVATE_KEY missing.");
     }
 
     if (!isRequestSignatureValid(req)) {
+      console.log("❌ Signature invalid");
       return res.sendStatus(432);
     }
+
+    console.log("✅ Signature OK");
 
     const decryptedRequest = decryptRequest(
       req.body,
@@ -76,13 +111,13 @@ app.post("/", async (req, res) => {
       decryptedBody,
     } = decryptedRequest;
 
-    console.log("💬 Flow Request");
-    console.log(decryptedBody);
+    console.log("💬 Decrypted Request:");
+    console.log(JSON.stringify(decryptedBody, null, 2));
 
     const response = await getNextScreen(decryptedBody);
 
-    console.log("➡️ Flow Response");
-    console.log(response);
+    console.log("👉 Response:");
+    console.log(JSON.stringify(response, null, 2));
 
     return res.send(
       encryptResponse(
@@ -92,6 +127,7 @@ app.post("/", async (req, res) => {
       )
     );
   } catch (err) {
+    console.error("===== FLOW ERROR =====");
     console.error(err);
 
     if (err instanceof FlowEndpointException) {
@@ -104,13 +140,14 @@ app.post("/", async (req, res) => {
 
 function isRequestSignatureValid(req) {
   if (!APP_SECRET) {
-    console.warn("APP_SECRET not configured.");
+    console.warn("APP_SECRET missing");
     return true;
   }
 
   const signature = req.get("x-hub-signature-256");
 
   if (!signature) {
+    console.log("No signature header");
     return false;
   }
 
@@ -126,5 +163,5 @@ function isRequestSignatureValid(req) {
 }
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🚀 Server listening on port ${PORT}`);
 });
