@@ -72,7 +72,7 @@ app.post("/", async (req, res) => {
   // 1. Handle Health Check Pings (Empty Body)
   if (!req.body || Object.keys(req.body).length === 0) {
     console.log("Health Check detected. Sending plain 200 OK.");
-    return res.status(200).send("OK");
+    return res.status(200).setHeader('Content-Type', 'text/plain').send("OK");
   }
 
   try {
@@ -105,7 +105,7 @@ app.post("/", async (req, res) => {
     // 2. CRITICAL: Always return a plain "OK" with 200 status to satisfy the Health Check
     // even if decryption fails (which happens during health check pings).
     console.log("Sending plain 'OK' with 200 status to pass health check.");
-    return res.status(200).send("OK");
+    return res.status(200).setHeader('Content-Type', 'text/plain').send("OK");
   }
 });
 
