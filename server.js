@@ -28,7 +28,6 @@ const {
 // ===== STARTUP DIAGNOSTICS =====
 console.log("======================================");
 console.log("Server starting...");
-console.log("PRIVATE_KEY loaded:", !!PRIVATE_KEY);
 
 if (PRIVATE_KEY) {
   try {
@@ -71,9 +70,10 @@ app.post("/", async (req, res) => {
   console.log("🔥 POST / received");
 
   // 1. Handle Health Check Pings (Empty Body)
+  // Return a plain "OK" to pass the decryption check
   if (!req.body || Object.keys(req.body).length === 0) {
-    console.log("Empty body received (Health Check). Sending 200 OK.");
-    return res.sendStatus(200);
+    console.log("Health Check detected. Sending plain 200 OK.");
+    return res.status(200).send("OK");
   }
 
   try {
@@ -103,10 +103,10 @@ app.post("/", async (req, res) => {
     console.error("===== FLOW ERROR =====");
     console.error(err);
 
-    // 2. CRITICAL: Always return 200 OK to satisfy the Health Check
+    // 2. CRITICAL: Always return a plain 200 OK to satisfy the Health Check
     // even if decryption fails during your setup phase.
-    console.log("Sending 200 OK despite error to pass health check.");
-    return res.sendStatus(200);
+    console.log("Sending plain 200 OK despite error to pass health check.");
+    return res.status(200).send("OK");
   }
 });
 
